@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Equity Compass — Macro-Filtered Momentum Rotation</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#F9F8F6;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+#root{max-width:760px;margin:0 auto;padding:28px 20px 48px}
+button{font-family:inherit;cursor:pointer}
+@media(max-width:600px){#root{padding:16px 12px 40px}}
+</style>
+</head>
+<body>
+<div id="root"><p style="padding:2rem;color:#888;font-size:13px">Loading...</p></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script>
+// ── Data ────────────────────────────────────────────────────────────────────
+var C = {anchor:"#1A3A5C",factor:"#2E75B6",sector:"#1D9E75",thematic:"#BA7517",cash:"#7F77DD"};
+var CS = {
+  offensive:   {bg:"#EAF3DE",color:"#3B6D11",border:"#C0DD97"},
+  defensive:   {bg:"#E6F1FB",color:"#185FA5",border:"#B5D4F4"},
+  maxDefensive:{bg:"#FCEBEB",color:"#A32D2D",border:"#F7C1C1"},
+  maxOffensive:{bg:"#EAF3DE",color:"#27500A",border:"#C0DD97"},
+  inflation:   {bg:"#FAEEDA",color:"#854F0B",border:"#FAC775"}
+};
+var SLEEVE_RANGES = {Anchor:"20-50%",Factor:"20-40%",Sector:"15-30%",Thematic:"0-15%",Cash:"0-30%"};
+var REGIMES = [
+  {id:"goldilocks",name:"Goldilocks",subtitle:"Mid-cycle expansion",emoji:"☀️",
+   macro:{pmi:"53.4",pmiNote:"expanding",cpi:"2.1%",cpiNote:"stable",nfci:"-0.65",nfciNote:"loose",curve:"+85 bp",curveNote:"normal"},
+   scores:{growth:72,inflation:45,fci:75},character:"offensive",charLabel:"Offensive",holdings:6,vol:"14-18%",cashPct:"0%",
+   alloc:[
+     {sleeve:"Anchor",  etf:"MSCI World",ticker:"IWDA",score:72,weight:20,color:C.anchor},
+     {sleeve:"Factor",  etf:"Momentum",  ticker:"IS3R",score:88,weight:25,color:C.factor},
+     {sleeve:"Factor",  etf:"Quality",   ticker:"IS3Q",score:75,weight:15,color:C.factor},
+     {sleeve:"Sector",  etf:"IT",        ticker:"WITS",score:92,weight:20,color:C.sector},
+     {sleeve:"Sector",  etf:"Financials",ticker:"WFNS",score:71,weight:10,color:C.sector},
+     {sleeve:"Thematic",etf:"AI / Semis",ticker:"SEMI",score:82,weight:10,color:C.thematic}],
+   logic:"Full universe eligible. Momentum dominates. IT and Financials lead sector picks. AI/Semis thematic active. Minimum anchor at 20%.",
+   drawdown:{scenario:"-40% MSCI World crash",estimate:"-27 to -33%",vsLite:"Similar — both fully invested"}},
+  {id:"latecycle",name:"Late-Cycle",subtitle:"Slowing growth, sticky inflation",emoji:"🌤",
+   macro:{pmi:"48.2",pmiNote:"contracting",cpi:"3.8%",cpiNote:"elevated",nfci:"-0.15",nfciNote:"tightening",curve:"-45 bp",curveNote:"inverted"},
+   scores:{growth:35,inflation:70,fci:40},character:"defensive",charLabel:"Defensive",holdings:5,vol:"10-14%",cashPct:"10%",
+   alloc:[
+     {sleeve:"Anchor",etf:"MSCI World",ticker:"IWDA",score:72,  weight:30,color:C.anchor},
+     {sleeve:"Factor",etf:"Quality",   ticker:"IS3Q",score:80,  weight:20,color:C.factor},
+     {sleeve:"Factor",etf:"Min-Vol",   ticker:"MVOL",score:76,  weight:15,color:C.factor},
+     {sleeve:"Sector",etf:"Healthcare",ticker:"WHCS",score:73,  weight:15,color:C.sector},
+     {sleeve:"Sector",etf:"Energy",    ticker:"WENS",score:68,  weight:10,color:C.sector},
+     {sleeve:"Cash",  etf:"EUR MM ETF",ticker:"XEON",score:null,weight:10,color:C.cash}],
+   logic:"Cyclicals capped. Defensives preferred. Weakest holding failed trend — 10% cash instead of forced anchor fill. Tech excluded despite momentum — macro override.",
+   drawdown:{scenario:"-40% MSCI World crash",estimate:"-18 to -26%",vsLite:"Modest improvement vs. Lite"}},
+  {id:"contraction",name:"Contraction",subtitle:"Falling growth, falling inflation",emoji:"🌧",
+   macro:{pmi:"44.1",pmiNote:"deep contraction",cpi:"1.5%",cpiNote:"falling",nfci:"+0.40",nfciNote:"tight / stress",curve:"+120 bp",curveNote:"bull-steepening"},
+   scores:{growth:15,inflation:25,fci:20},character:"maxDefensive",charLabel:"Max Defensive",holdings:4,vol:"12-16%",cashPct:"30%",
+   alloc:[
+     {sleeve:"Anchor",etf:"MSCI World",ticker:"IWDA",score:65,  weight:35,color:C.anchor},
+     {sleeve:"Factor",etf:"Min-Vol",   ticker:"MVOL",score:72,  weight:20,color:C.factor},
+     {sleeve:"Factor",etf:"Quality",   ticker:"IS3Q",score:68,  weight:15,color:C.factor},
+     {sleeve:"Cash",  etf:"EUR MM ETF",ticker:"XEON",score:null,weight:30,color:C.cash}],
+   logic:"Only defensive universe eligible. All sectors failed trend — 30% cash (max). Honest expectation: still -15 to -22% in a 2008-style crash.",
+   drawdown:{scenario:"-40% MSCI World crash",estimate:"-15 to -22%",vsLite:"Meaningful improvement vs. Lite (-22 to -30%)"}},
+  {id:"reflation",name:"Reflation",subtitle:"Early recovery, low inflation",emoji:"🌱",
+   macro:{pmi:"51.8",pmiNote:"just above 50",cpi:"1.9%",cpiNote:"low / falling",nfci:"-0.50",nfciNote:"easing fast",curve:"+180 bp",curveNote:"steep bull"},
+   scores:{growth:58,inflation:30,fci:70},character:"maxOffensive",charLabel:"Max Offensive",holdings:6,vol:"16-22%",cashPct:"0%",
+   alloc:[
+     {sleeve:"Anchor",  etf:"MSCI World",  ticker:"IWDA",score:70,weight:20,color:C.anchor},
+     {sleeve:"Factor",  etf:"Small Cap",   ticker:"WSML",score:85,weight:20,color:C.factor},
+     {sleeve:"Factor",  etf:"Momentum",    ticker:"IS3R",score:78,weight:15,color:C.factor},
+     {sleeve:"Sector",  etf:"Financials",  ticker:"WFNS",score:88,weight:20,color:C.sector},
+     {sleeve:"Sector",  etf:"Industrials", ticker:"WIDS",score:80,weight:15,color:C.sector},
+     {sleeve:"Thematic",etf:"Nuclear",     ticker:"URNU",score:74,weight:10,color:C.thematic}],
+   logic:"Full cyclical universe eligible. Small cap leads early recovery. Financials rank-1 sector on steepening curve. No defensive factors — Quality and Min-Vol sit this out.",
+   drawdown:{scenario:"-40% MSCI World crash",estimate:"-30 to -38%",vsLite:"Slightly worse — maximum cyclical exposure"}},
+  {id:"inflation",name:"Inflationary Growth",subtitle:"Commodity boom, rising rates",emoji:"🔥",
+   macro:{pmi:"54.0",pmiNote:"strong expansion",cpi:"5.2%",cpiNote:"high & rising",nfci:"-0.30",nfciNote:"neutral",curve:"+40 bp",curveNote:"bear-flattening"},
+   scores:{growth:68,inflation:82,fci:55},character:"inflation",charLabel:"Inflation-Oriented",holdings:6,vol:"14-18%",cashPct:"0%",
+   alloc:[
+     {sleeve:"Anchor",  etf:"MSCI World",ticker:"IWDA",score:68,weight:20,color:C.anchor},
+     {sleeve:"Factor",  etf:"Quality",   ticker:"IS3Q",score:72,weight:15,color:C.factor},
+     {sleeve:"Factor",  etf:"Momentum",  ticker:"IS3R",score:80,weight:15,color:C.factor},
+     {sleeve:"Sector",  etf:"Energy",    ticker:"WENS",score:92,weight:25,color:C.sector},
+     {sleeve:"Sector",  etf:"Financials",ticker:"WFNS",score:75,weight:15,color:C.sector},
+     {sleeve:"Thematic",etf:"Nuclear",   ticker:"URNU",score:70,weight:10,color:C.thematic}],
+   logic:"Energy rank-1 at 25% — direct commodity & inflation beneficiary. Quality provides pricing power. Tech underweight — suffers in rising-rate env.",
+   drawdown:{scenario:"-40% MSCI World crash",estimate:"-26 to -32%",vsLite:"Broadly similar"}}
+];
+var SNAP = {
+  date:"June 2026",regime:"Inflationary Growth / Late-Cycle Hybrid",confidence:"MEDIUM",
+  confidenceNote:"Contested — growth strong but supply-driven; inflation re-accelerating",
+  scores:{growth:72,inflation:78,fci:58},closestRegime:"inflation",
+  trendNote:"200-DMA and 12M return checked as of Jun 17 2026 close. URNU unverified — requires manual IC confirmation.",
+  indicators:[
+    {label:"Global Mfg PMI",  value:"52.6",  note:"May 2026 · 10th month above 50",                   status:"ok",  statusLabel:"Expanding"},
+    {label:"US Mfg PMI",      value:"55.1",  note:"Strongest since May 2022 · exports still falling",  status:"ok",  statusLabel:"Strong"},
+    {label:"OECD CLI (US)",   value:"100.9", note:"Apr 2026 · direction rising · above LR avg",        status:"ok",  statusLabel:"Expanding"},
+    {label:"US CPI YoY",      value:"4.2%",  note:"May 2026 · highest since Apr 2023 · energy +23.5%", status:"hot", statusLabel:"Hot"},
+    {label:"Eurozone CPI",    value:"3.2%",  note:"May 2026 · highest since Sep 2023 · energy +10.9%", status:"hot", statusLabel:"Hot"},
+    {label:"Yield curve 10Y-3M",value:"+73 bp",note:"Jun 17 2026 · 10Y 4.49% · 3M 3.77%",            status:"ok",  statusLabel:"Normal"},
+    {label:"NFCI",            value:"-0.43", note:"Mar 27 2026 · loose but tightening from -0.56",     status:"warn",statusLabel:"Tightening"}
+  ],
+  proposedAlloc:[
+    {sleeve:"Anchor",  etf:"MSCI World",ticker:"IWDA",score:68,weight:20,color:C.anchor,  trend:"on",        trendDetail:"Price > 200-DMA · 12M return +18.4%",             rationale:"Minimum anchor — risk-on posture, confirmed trend"},
+    {sleeve:"Factor",  etf:"Quality",   ticker:"IS3Q",score:75,weight:15,color:C.factor,  trend:"on",        trendDetail:"Price > 200-DMA · 12M return +16.1%",             rationale:"Pricing-power companies outperform in inflation"},
+    {sleeve:"Factor",  etf:"Momentum",  ticker:"IS3R",score:82,weight:15,color:C.factor,  trend:"on",        trendDetail:"Price > 200-DMA · 12M return +22.7%",             rationale:"Captures energy & commodity sector leadership"},
+    {sleeve:"Sector",  etf:"Energy",    ticker:"WENS",score:90,weight:25,color:C.sector,  trend:"on",        trendDetail:"Price > 200-DMA · 12M return +31.2%",             rationale:"Rank-1 — direct Iran conflict / commodity beneficiary"},
+    {sleeve:"Sector",  etf:"Financials",ticker:"WFNS",score:73,weight:15,color:C.sector,  trend:"on",        trendDetail:"Price > 200-DMA · 12M return +14.8%",             rationale:"Rising rates — net interest margin expansion"},
+    {sleeve:"Thematic",etf:"Nuclear",   ticker:"URNU",score:68,weight:10,color:C.thematic,trend:"unverified",trendDetail:"Manual check required — if trend-off, 10% to IWDA",rationale:"Energy complex theme; IC must confirm before approving"}
+  ],
+  watchItems:[
+    "NFCI June reading not yet available — if continues tightening, FCI score falls to ~45, shifts toward Late-Cycle",
+    "PMI strength is partly front-loading — new orders sub-index key; demand weakness would flip regime",
+    "Fed signals potential hike by Oct — confirmed hike would accelerate regime shift to Late-Cycle",
+    "Eurozone Mfg PMI remains in contraction (~48-49) — US/EZ divergence limits global growth score upside",
+    "Persistence rule: regime must hold 2 consecutive months before universe switch triggers",
+    "Nuclear / URNU: trend status unverified — do not add without IC price confirmation"
+  ],
+  sources:"JP Morgan Global Mfg PMI Jun 2026 · BLS CPI May 2026 · Eurostat HICP May 2026 · US Treasury Jun 17 2026 · Chicago Fed NFCI Mar 2026 · OECD CLI Apr 2026"
+};
+var LITE = {
+  description:"40% MSCI World · 20% Quality · 20% Min-Vol · 20% top-momentum GICS sector (monthly rotation)",
+  purpose:"Honest robustness check — tests whether v2.0 complexity earns its keep vs. a simpler alternative.",
+  alloc:[
+    {label:"MSCI World",ticker:"IWDA",weight:40,color:C.anchor},
+    {label:"Quality",   ticker:"IS3Q",weight:20,color:C.factor},
+    {label:"Min-Vol",   ticker:"MVOL",weight:20,color:C.factor},
+    {label:"Top sector",ticker:"—",   weight:20,color:C.sector,note:"Monthly rotation to rank-1 momentum sector"}
+  ],
+  turnover:"~60-100% / yr",holdings:4,cost:"~5-8 bps avg",
+  regimes:[
+    {regime:"Goldilocks",emoji:"☀️",verdict:"similar",verdictLabel:"Similar",
+     v2:{alloc:"20% IWDA · 40% Factor · 30% Sector · 10% Thematic",vol:"14-18%",dd:"-27 to -33%",edge:"Thematic + Momentum factor add upside vs. Lite"},
+     lite:{alloc:"40% IWDA · 20% IS3Q · 20% MVOL · 20% IT",vol:"13-17%",dd:"-28 to -35%",note:"Similar posture, less conviction tilt"},
+     note:"Both fully invested and growth-oriented. v2.0 has more offensive tilt via Momentum ETF and thematic slot. Difference is modest."},
+    {regime:"Late-Cycle",emoji:"🌤",verdict:"v2wins",verdictLabel:"v2.0 better",
+     v2:{alloc:"30% IWDA · 35% Factor · 25% Sector · 10% Cash",vol:"10-14%",dd:"-18 to -26%",edge:"Cash + macro override materially reduces drawdown"},
+     lite:{alloc:"40% IWDA · 20% IS3Q · 20% MVOL · 20% Healthcare",vol:"12-16%",dd:"-22 to -30%",note:"Sector correct but capped at 20%; no cash option"},
+     note:"Cash sleeve is the decisive advantage. Macro override blocks cyclical sectors Lite cannot restrict. ~4-6pp drawdown improvement."},
+    {regime:"Contraction",emoji:"🌧",verdict:"v2wins",verdictLabel:"v2.0 better",
+     v2:{alloc:"35% IWDA · 35% Factor · 30% Cash",vol:"12-16%",dd:"-15 to -22%",edge:"30% cash structurally unavailable to Lite"},
+     lite:{alloc:"40% IWDA · 20% IS3Q · 20% MVOL · 20% Staples",vol:"14-17%",dd:"-22 to -30%",note:"Staples may also fail trend filter; no escape valve"},
+     note:"Largest advantage of the full model. Cash sleeve provides ~7-8pp additional drawdown protection. Lite has no escape valve when all sectors trend-off."},
+    {regime:"Reflation",emoji:"🌱",verdict:"litewins",verdictLabel:"Lite better",
+     v2:{alloc:"20% IWDA · 35% Factor · 35% Sector · 10% Thematic",vol:"16-22%",dd:"-30 to -38%",edge:"Small Cap and Nuclear thematic only in v2.0"},
+     lite:{alloc:"40% IWDA · 20% IS3Q · 20% MVOL · 20% Financials",vol:"13-17%",dd:"-26 to -33%",note:"Lite structurally conservative — heavy MVOL in risk-on"},
+     note:"In early recovery, Lite's forced Min-Vol becomes a drag — but also limits downside if the recovery is a false signal. Honest trade-off."},
+    {regime:"Inflationary Growth",emoji:"🔥",verdict:"similar",verdictLabel:"Similar",
+     v2:{alloc:"20% IWDA · 30% Factor · 40% Sector · 10% Thematic",vol:"14-18%",dd:"-26 to -32%",edge:"Energy at 25% plus Nuclear thematic"},
+     lite:{alloc:"40% IWDA · 20% IS3Q · 20% MVOL · 20% Energy",vol:"13-16%",dd:"-25 to -31%",note:"Energy correct but capped; MVOL a mild drag"},
+     note:"Both correctly rotate to Energy. v2.0 gets more exposure (25% + 10% Nuclear), but not decisive in this regime."}
+  ],
+  verdict:{
+    v2:"Late-Cycle and Contraction — cash sleeve and macro universe override provide structural protection unavailable to Lite. This is the core justification for the full model's complexity.",
+    lite:"Reflation — Lite's forced Min-Vol is a drag in full risk-on recovery, but also limits false-signal exposure. Honest cost of simplicity.",
+    sim:"Goldilocks and Inflationary Growth — both models agree on direction; v2.0 has more tactical conviction but no decisive edge.",
+    judge:"v2.0 justifies its complexity primarily through the cash sleeve and macro override in defensive regimes. If the IC cannot tolerate cash drag in bull markets, the case weakens. The 24-month paper trading requirement is the right gate before claiming the full model earns its keep."
+  }
+};
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+var h = React.createElement;
+
+function div(style,children){return h("div",{style:style},children)}
+function span(style,children){return h("span",{style:style},children)}
+
+function el(tag,props){
+  var kids = Array.prototype.slice.call(arguments,2);
+  return h(tag,props,kids.length===1?kids[0]:kids.length?kids:null);
+}
+
+function allocBar(alloc){
+  var total = alloc.reduce(function(s,a){return s+a.weight;},0);
+  return h("div",{style:{display:"flex",height:28,borderRadius:6,overflow:"hidden",gap:1}},
+    alloc.filter(function(a){return a.weight>0;}).map(function(a,i){
+      return h("div",{key:i,title:a.sleeve+": "+a.etf+" "+a.weight+"%",
+        style:{width:((a.weight/total)*100)+"%",background:a.color,display:"flex",
+               alignItems:"center",justifyContent:"center",fontSize:9,color:"#fff",
+               fontWeight:700,overflow:"hidden",whiteSpace:"nowrap",minWidth:0}},
+        a.weight>=12?a.weight+"%":"");
+    })
+  );
+}
+
+function scoreBar(value,color,label){
+  return h("div",{style:{flex:1}},
+    h("div",{style:{fontSize:10,color:"#94A3B8",marginBottom:4}},label),
+    h("div",{style:{height:5,background:"#EEECE6",borderRadius:3,overflow:"hidden"}},
+      h("div",{style:{width:value+"%",height:"100%",background:color,borderRadius:3}})),
+    h("div",{style:{fontSize:12,fontWeight:600,marginTop:3,color:color}},value)
+  );
+}
+
+function statusBadge(status,label){
+  var map={ok:["#EAF3DE","#3B6D11"],hot:["#FCEBEB","#A32D2D"],warn:["#FAEEDA","#854F0B"]};
+  var s=map[status]||map.ok;
+  return h("span",{style:{fontSize:10,padding:"2px 7px",borderRadius:4,fontWeight:600,background:s[0],color:s[1]}},label);
+}
+
+function trendBadge(trend){
+  var map={
+    on:        {bg:"#EAF3DE",color:"#3B6D11",border:"#C0DD97",label:"Trend ON",  icon:"✓"},
+    off:       {bg:"#FCEBEB",color:"#A32D2D",border:"#F7C1C1",label:"Trend OFF", icon:"✗"},
+    unverified:{bg:"#FAEEDA",color:"#854F0B",border:"#FAC775",label:"Unverified",icon:"?"}
+  };
+  var s=map[trend]||map.unverified;
+  return h("span",{style:{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,
+    padding:"2px 7px",borderRadius:4,fontWeight:600,background:s.bg,color:s.color,
+    border:"0.5px solid "+s.border,whiteSpace:"nowrap"}},s.icon+" "+s.label);
+}
+
+function verdictBadge(verdict,label){
+  var map={
+    v2wins: {bg:"#EAF3DE",color:"#3B6D11",border:"#C0DD97"},
+    litewins:{bg:"#FAEEDA",color:"#854F0B",border:"#FAC775"},
+    similar: {bg:"#F0EEE8",color:"#5F5E5A",border:"#D3D1C7"}
+  };
+  var s=map[verdict]||map.similar;
+  return h("span",{style:{fontSize:10,padding:"2px 8px",borderRadius:4,fontWeight:600,
+    background:s.bg,color:s.color,border:"0.5px solid "+s.border,whiteSpace:"nowrap"}},label);
+}
+
+function sectionLabel(text){
+  return h("div",{style:{fontSize:10,color:"#888",fontWeight:600,textTransform:"uppercase",
+    letterSpacing:"0.06em",marginBottom:8}},text);
+}
+
+// ── Views ────────────────────────────────────────────────────────────────────
+function SnapshotView(){
+  var snap=SNAP;
+  var ref=REGIMES.find(function(r){return r.id===snap.closestRegime;});
+  return h("div",null,
+    // Regime box
+    h("div",{style:{background:"#F5F0FE",border:"1px solid #CECBF6",borderRadius:10,padding:"16px 18px",marginBottom:16}},
+      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}},
+        h("div",null,
+          h("div",{style:{fontSize:10,color:"#7F77DD",fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.06em"}},"Current regime — "+snap.date),
+          h("div",{style:{fontSize:18,fontWeight:700,color:"#26215C"}},snap.regime),
+          h("div",{style:{fontSize:12,color:"#534AB7",marginTop:4}},snap.confidenceNote)
+        ),
+        h("div",{style:{textAlign:"right"}},
+          h("div",{style:{fontSize:10,color:"#7F77DD",marginBottom:2}},"Confidence"),
+          h("div",{style:{fontSize:18,fontWeight:700,color:snap.confidence==="MEDIUM"?"#854F0B":"#3B6D11"}},snap.confidence)
+        )
+      ),
+      h("div",{style:{display:"flex",gap:14,marginTop:16}},
+        scoreBar(snap.scores.growth,"#1D9E75","Growth sub-score"),
+        scoreBar(snap.scores.inflation,"#D85A30","Inflation sub-score"),
+        scoreBar(snap.scores.fci,"#378ADD","FCI sub-score")
+      ),
+      h("div",{style:{fontSize:11,color:"#7F77DD",marginTop:12}},
+        "Closest scenario match: ",h("strong",null,ref?ref.name+" — "+ref.subtitle:""))
+    ),
+    // Indicators
+    sectionLabel("Six-indicator panel"),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:18}},
+      snap.indicators.map(function(ind,i){
+        return h("div",{key:i,style:{background:"#fff",border:"0.5px solid #E4E2DA",borderRadius:8,padding:"10px 12px"}},
+          h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+            h("span",{style:{fontSize:10,color:"#888"}},ind.label),
+            statusBadge(ind.status,ind.statusLabel)
+          ),
+          h("div",{style:{fontSize:18,fontWeight:700,color:"#1A3A5C"}},ind.value),
+          h("div",{style:{fontSize:10,color:"#94A3B8",marginTop:2}},ind.note)
+        );
+      })
+    ),
+    // Proposed alloc
+    sectionLabel("Proposed allocation — Scenario 5 posture"),
+    h("div",{style:{background:"#fff",border:"0.5px solid #E4E2DA",borderRadius:10,padding:"14px 16px",marginBottom:16}},
+      allocBar(snap.proposedAlloc),
+      h("div",{style:{display:"flex",flexWrap:"wrap",gap:6,marginTop:10,marginBottom:14}},
+        snap.proposedAlloc.filter(function(a){return a.weight>0;}).map(function(a,i){
+          return h("span",{key:i,style:{display:"flex",alignItems:"center",gap:5,fontSize:11}},
+            h("span",{style:{width:9,height:9,borderRadius:2,background:a.color,display:"inline-block",flexShrink:0}}),
+            h("span",{style:{color:"#444"}},a.etf),
+            h("span",{style:{color:"#94A3B8"}},a.weight+"%")
+          );
+        })
+      ),
+      // Column headers
+      h("div",{style:{display:"grid",gridTemplateColumns:"2fr 0.4fr 0.5fr 1.3fr 2fr",gap:6,
+        padding:"5px 0",borderTop:"0.5px solid #EDEAE2",borderBottom:"0.5px solid #EDEAE2",marginBottom:2}},
+        ["ETF","Wt","Score","Trend filter","Rationale"].map(function(h2,i){
+          return h("div",{key:i,style:{fontSize:9,color:"#94A3B8",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.04em"}},h2);
+        })
+      ),
+      snap.proposedAlloc.filter(function(a){return a.weight>0;}).map(function(a,i){
+        return h("div",{key:i,style:{display:"grid",gridTemplateColumns:"2fr 0.4fr 0.5fr 1.3fr 2fr",
+          gap:6,alignItems:"start",padding:"8px 0",borderBottom:"0.5px solid #F5F3EF"}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:6,minWidth:0}},
+            h("span",{style:{width:7,height:7,borderRadius:2,background:a.color,display:"inline-block",flexShrink:0,marginTop:2}}),
+            h("div",{style:{minWidth:0}},
+              h("div",{style:{fontSize:12,fontWeight:600,color:"#222"}},a.etf),
+              h("div",{style:{fontSize:10,color:"#94A3B8"}},a.ticker)
+            )
+          ),
+          h("div",{style:{fontSize:12,fontWeight:700,color:a.color,paddingTop:1}},a.weight+"%"),
+          h("div",{style:{fontSize:11,fontWeight:600,paddingTop:1,
+            color:a.score>=80?"#1D9E75":a.score>=65?"#BA7517":"#888"}},a.score||""),
+          h("div",{style:{minWidth:0}},
+            trendBadge(a.trend),
+            h("div",{style:{fontSize:9,color:"#B4B2A9",marginTop:3,lineHeight:1.4}},a.trendDetail)
+          ),
+          h("div",{style:{fontSize:11,color:"#6B7B8D",lineHeight:1.45,paddingTop:1}},a.rationale)
+        );
+      }),
+      h("div",{style:{fontSize:10,color:"#94A3B8",marginTop:10,paddingTop:8,borderTop:"0.5px solid #EDEAE2",lineHeight:1.5}},
+        h("strong",{style:{color:"#5F5E5A"}},"Trend filter: "),snap.trendNote)
+    ),
+    // Watch items
+    h("div",{style:{background:"#FAEEDA",borderRadius:8,padding:"12px 14px",marginBottom:14}},
+      h("div",{style:{fontSize:11,fontWeight:700,color:"#633806",marginBottom:6}},"IC watch items before confirming posture"),
+      snap.watchItems.map(function(w,i){
+        return h("div",{key:i,style:{fontSize:11,color:"#854F0B",lineHeight:1.6,paddingLeft:12,position:"relative"}},
+          h("span",{style:{position:"absolute",left:0}},"·"),w);
+      })
+    ),
+    h("div",{style:{fontSize:9,color:"#B4B2A9",lineHeight:1.6}},"Sources: "+snap.sources)
+  );
+}
+
+function LiteView(){
+  var React2=React;
+  var expanded=React2.useState(null);
+  var exp=expanded[0], setExp=expanded[1];
+  var liteTotal=LITE.alloc.reduce(function(s,a){return s+a.weight;},0);
+  return h("div",null,
+    h("div",{style:{background:"#F5F7FA",border:"0.5px solid #E4E2DA",borderRadius:10,padding:"14px 16px",marginBottom:16}},
+      sectionLabel("Equity Compass Lite — static construction"),
+      h("div",{style:{display:"flex",height:22,borderRadius:5,overflow:"hidden",gap:1,marginBottom:10}},
+        LITE.alloc.map(function(a,i){
+          return h("div",{key:i,style:{width:((a.weight/liteTotal)*100)+"%",background:a.color,
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#fff",fontWeight:700}},a.weight+"%");
+        })
+      ),
+      h("div",{style:{display:"flex",flexWrap:"wrap",gap:8,marginBottom:10}},
+        LITE.alloc.map(function(a,i){
+          return h("span",{key:i,style:{display:"flex",alignItems:"center",gap:5,fontSize:11}},
+            h("span",{style:{width:8,height:8,borderRadius:2,background:a.color,display:"inline-block",flexShrink:0}}),
+            h("strong",{style:{color:"#444"}},a.label),
+            h("span",{style:{color:"#94A3B8"}},a.ticker+" · "+a.weight+"%"),
+            a.note?h("em",{style:{color:"#B4B2A9",fontSize:10}},"("+a.note+")"):null
+          );
+        })
+      ),
+      h("div",{style:{fontSize:11,color:"#6B7B8D",marginBottom:10}},LITE.description),
+      h("div",{style:{display:"flex",gap:8}},
+        [{label:"Holdings",val:LITE.holdings},{label:"Est. turnover",val:LITE.turnover},{label:"Avg cost",val:LITE.cost}].map(function(s,i){
+          return h("div",{key:i,style:{flex:1,background:"#fff",borderRadius:6,padding:"7px 10px",border:"0.5px solid #E4E2DA"}},
+            h("div",{style:{fontSize:9,color:"#94A3B8",marginBottom:2}},s.label),
+            h("div",{style:{fontSize:12,fontWeight:700,color:"#1A3A5C"}},s.val)
+          );
+        })
+      ),
+      h("div",{style:{fontSize:11,color:"#6B7B8D",marginTop:10,fontStyle:"italic"}},LITE.purpose)
+    ),
+    sectionLabel("Regime-by-regime comparison"),
+    LITE.regimes.map(function(row,i){
+      return h("div",{key:i,style:{border:"0.5px solid #E4E2DA",borderRadius:10,marginBottom:8,overflow:"hidden"}},
+        h("div",{onClick:function(){setExp(exp===i?null:i);},
+          style:{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",cursor:"pointer",
+                 background:exp===i?"#FAFAF8":"#fff",userSelect:"none"}},
+          h("div",{style:{fontSize:13,fontWeight:700,color:"#1A3A5C",flex:1}},row.emoji+" "+row.regime),
+          verdictBadge(row.verdict,row.verdictLabel),
+          h("div",{style:{fontSize:18,color:"#94A3B8",fontWeight:300}},exp===i?"−":"+")
+        ),
+        exp===i?h("div",{style:{borderTop:"0.5px solid #EDEAE2",padding:"12px 14px",background:"#FAFAF8"}},
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+            h("div",{style:{background:"#fff",border:"0.5px solid #CECBF6",borderRadius:8,padding:"10px 12px"}},
+              h("div",{style:{fontSize:10,fontWeight:700,color:"#534AB7",marginBottom:6}},"Equity Compass v2.0"),
+              h("div",{style:{fontSize:11,color:"#444",lineHeight:1.5,marginBottom:6}},row.v2.alloc),
+              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+                h("span",{style:{fontSize:10,color:"#888"}},"Vol: ",h("strong",{style:{color:"#222"}},row.v2.vol)),
+                h("span",{style:{fontSize:10,color:"#A32D2D"}},"DD: ",h("strong",null,row.v2.dd))
+              ),
+              row.v2.edge?h("div",{style:{fontSize:10,color:"#3B6D11",marginTop:6,fontStyle:"italic"}},"+ "+row.v2.edge):null
+            ),
+            h("div",{style:{background:"#fff",border:"0.5px solid #D3D1C7",borderRadius:8,padding:"10px 12px"}},
+              h("div",{style:{fontSize:10,fontWeight:700,color:"#5F5E5A",marginBottom:6}},"Equity Compass Lite"),
+              h("div",{style:{fontSize:11,color:"#444",lineHeight:1.5,marginBottom:6}},row.lite.alloc),
+              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+                h("span",{style:{fontSize:10,color:"#888"}},"Vol: ",h("strong",{style:{color:"#222"}},row.lite.vol)),
+                h("span",{style:{fontSize:10,color:"#A32D2D"}},"DD: ",h("strong",null,row.lite.dd))
+              ),
+              row.lite.note?h("div",{style:{fontSize:10,color:"#888",marginTop:6,fontStyle:"italic"}},row.lite.note):null
+            )
+          ),
+          h("div",{style:{fontSize:11,color:"#444",lineHeight:1.55,padding:"8px 10px",background:"#fff",borderRadius:6,border:"0.5px solid #EDEAE2"}},
+            h("strong",{style:{color:"#1A3A5C"}},"IC judgement: "),row.note)
+        ):null
+      );
+    }),
+    h("div",{style:{marginTop:16,border:"0.5px solid #E4E2DA",borderRadius:10,overflow:"hidden"}},
+      h("div",{style:{padding:"10px 14px",background:"#1A3A5C"}},
+        h("div",{style:{fontSize:11,fontWeight:700,color:"#fff"}},"Overall IC verdict")),
+      h("div",{style:{padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}},
+        [{label:"When v2.0 wins",text:LITE.verdict.v2,  bg:"#EAF3DE",lc:"#3B6D11"},
+         {label:"When Lite wins",text:LITE.verdict.lite, bg:"#FAEEDA",lc:"#854F0B"},
+         {label:"When similar",  text:LITE.verdict.sim,  bg:"#F0EEE8",lc:"#5F5E5A"}
+        ].map(function(row,i){
+          return h("div",{key:i,style:{display:"flex",gap:10,alignItems:"flex-start"}},
+            h("div",{style:{minWidth:92,fontSize:10,fontWeight:700,color:row.lc,background:row.bg,
+              padding:"3px 7px",borderRadius:4,textAlign:"center",flexShrink:0}},row.label),
+            h("div",{style:{fontSize:11,color:"#444",lineHeight:1.55}},row.text)
+          );
+        }),
+        h("div",{style:{marginTop:4,fontSize:11,color:"#1A3A5C",lineHeight:1.6,fontStyle:"italic",
+          padding:"8px 10px",background:"#F5F0FE",borderRadius:6,border:"0.5px solid #CECBF6"}},LITE.verdict.judge)
+      )
+    ),
+    h("div",{style:{fontSize:9,color:"#B4B2A9",marginTop:12,lineHeight:1.6}},
+      "Note: all drawdown estimates are illustrative ranges based on historical factor/sector behaviour. Not backtested performance.")
+  );
+}
+
+function RegimeView(props){
+  var r=props.r, cs=CS[r.character];
+  return h("div",null,
+    h("div",{style:{background:"#F5F7FA",borderRadius:10,padding:"12px 14px",marginBottom:14}},
+      sectionLabel("Macro context"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}},
+        [{label:"Global PMI",val:r.macro.pmi,note:r.macro.pmiNote},
+         {label:"CPI YoY",  val:r.macro.cpi,note:r.macro.cpiNote},
+         {label:"NFCI",     val:r.macro.nfci,note:r.macro.nfciNote},
+         {label:"Yield curve",val:r.macro.curve,note:r.macro.curveNote}
+        ].map(function(m,i){
+          return h("div",{key:i},
+            h("div",{style:{fontSize:9,color:"#94A3B8",marginBottom:2}},m.label),
+            h("div",{style:{fontSize:15,fontWeight:700,color:"#1A3A5C"}},m.val),
+            h("div",{style:{fontSize:9,color:"#888"}},m.note)
+          );
+        })
+      ),
+      h("div",{style:{display:"flex",gap:12,marginTop:12}},
+        scoreBar(r.scores.growth,"#1D9E75","Growth"),
+        scoreBar(r.scores.inflation,"#D85A30","Inflation"),
+        scoreBar(r.scores.fci,"#378ADD","FCI")
+      )
+    ),
+    h("div",{style:{marginBottom:10}},allocBar(r.alloc)),
+    h("div",{style:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}},
+      r.alloc.filter(function(a){return a.weight>0;}).map(function(a,i){
+        return h("span",{key:i,style:{display:"flex",alignItems:"center",gap:5,fontSize:11}},
+          h("span",{style:{width:9,height:9,borderRadius:2,background:a.color,display:"inline-block",flexShrink:0}}),
+          h("span",{style:{color:"#444"}},a.etf),
+          h("span",{style:{color:"#94A3B8"}},a.weight+"%")
+        );
+      })
+    ),
+    h("div",{style:{background:"#fff",border:"0.5px solid #E4E2DA",borderRadius:10,overflow:"hidden",marginBottom:14}},
+      r.alloc.filter(function(a){return a.weight>0;}).map(function(a,i){
+        return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 14px",
+          borderTop:i>0?"0.5px solid #F5F3EF":"none"}},
+          h("span",{style:{width:8,height:8,borderRadius:2,background:a.color,display:"inline-block",flexShrink:0}}),
+          h("div",{style:{fontSize:11,color:"#94A3B8",minWidth:56}},a.sleeve),
+          h("div",{style:{fontSize:13,fontWeight:600,color:"#222",flex:1}},a.etf),
+          h("div",{style:{fontSize:11,color:"#94A3B8",minWidth:36}},a.ticker),
+          a.score
+            ?h("div",{style:{fontSize:11,fontWeight:600,color:a.score>=80?"#1D9E75":a.score>=65?"#BA7517":"#888"}},a.score)
+            :h("div",{style:{fontSize:11,color:"#94A3B8"}},"yield"),
+          h("div",{style:{fontSize:13,fontWeight:700,color:a.color,minWidth:34,textAlign:"right"}},a.weight+"%")
+        );
+      })
+    ),
+    h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+      [{label:"Holdings",val:r.holdings},{label:"Expected vol",val:r.vol},{label:"Cash",val:r.cashPct}].map(function(s,i){
+        return h("div",{key:i,style:{flex:1,background:"#F5F7FA",borderRadius:8,padding:"8px 10px"}},
+          h("div",{style:{fontSize:9,color:"#94A3B8",marginBottom:3}},s.label),
+          h("div",{style:{fontSize:14,fontWeight:700,color:"#1A3A5C"}},s.val)
+        );
+      }),
+      h("div",{style:{flex:2,background:cs.bg,border:"0.5px solid "+cs.border,borderRadius:8,padding:"8px 10px"}},
+        h("div",{style:{fontSize:9,color:cs.color,marginBottom:3,opacity:0.7}},"Character"),
+        h("div",{style:{fontSize:13,fontWeight:700,color:cs.color}},r.charLabel)
+      )
+    ),
+    h("div",{style:{fontSize:12,color:"#6B7B8D",lineHeight:1.6,padding:"10px 12px",background:"#F5F7FA",borderRadius:8,marginBottom:14}},r.logic),
+    h("div",{style:{border:"0.5px solid #EDEAE2",borderRadius:8,padding:"10px 12px"}},
+      h("div",{style:{fontSize:10,color:"#888",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}},"Honest drawdown expectation"),
+      h("div",{style:{fontSize:11,color:"#444",lineHeight:1.5}},
+        h("strong",{style:{color:"#A32D2D"}},r.drawdown.scenario+": "),r.drawdown.estimate),
+      h("div",{style:{fontSize:11,color:"#94A3B8",marginTop:3}},"vs. Equity Compass Lite: "+r.drawdown.vsLite)
+    )
+  );
+}
+
+// ── App ──────────────────────────────────────────────────────────────────────
+function App(){
+  var state=React.useState("snapshot");
+  var activeTab=state[0], setTab=state[1];
+  var tabs=[
+    {id:"snapshot",label:"📍 Current snapshot",isNew:true},
+    {id:"lite",    label:"⚖️ Lite comparison"}
+  ].concat(REGIMES.map(function(r){return {id:r.id,label:r.emoji+" "+r.name};}));
+  var reg=REGIMES.find(function(r){return r.id===activeTab;});
+
+  return h("div",{style:{fontFamily:"system-ui,-apple-system,sans-serif"}},
+    // Header
+    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}},
+      h("div",null,
+        h("h1",{style:{fontSize:22,fontWeight:700,color:"#1A3A5C",margin:"0 0 3px"}},"Equity Compass"),
+        h("p",{style:{fontSize:12,color:"#6B7B8D",margin:0}},"Macro-filtered equity momentum rotation · v2.0 · Five-sleeve architecture")
+      ),
+      h("div",{style:{textAlign:"right"}},
+        h("div",{style:{fontSize:9,color:"#94A3B8",marginBottom:2}},"Strategy mandate"),
+        h("div",{style:{fontSize:11,fontWeight:600,color:"#534AB7"}},"Equity-dominant tactical"),
+        h("div",{style:{fontSize:9,color:"#94A3B8"}},"Min 70% equity · UCITS")
+      )
+    ),
+    // Sleeve legend
+    h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:18}},
+      ["Anchor","Factor","Sector","Thematic","Cash"].map(function(sl){
+        return h("div",{key:sl,style:{display:"flex",alignItems:"center",gap:5,padding:"4px 9px",borderRadius:5,background:"#F0EEE8",fontSize:10,color:"#555"}},
+          h("span",{style:{width:8,height:8,borderRadius:2,background:C[sl.toLowerCase()],display:"inline-block",flexShrink:0}}),
+          h("strong",null,sl),
+          h("span",{style:{color:"#94A3B8"}},SLEEVE_RANGES[sl])
+        );
+      })
+    ),
+    // Tabs
+    h("div",{style:{display:"flex",gap:4,flexWrap:"wrap",marginBottom:20,borderBottom:"0.5px solid #E4E2DA",paddingBottom:12}},
+      tabs.map(function(t){
+        var active=activeTab===t.id;
+        return h("button",{key:t.id,onClick:function(){setTab(t.id);},
+          style:{padding:"6px 13px",borderRadius:6,fontSize:12,fontWeight:active?700:400,
+                 border:active?"1.5px solid #7F77DD":"0.5px solid #E4E2DA",
+                 background:active?"#F5F0FE":"#fff",color:active?"#534AB7":"#555",
+                 cursor:"pointer",position:"relative"}},
+          t.label,
+          t.isNew&&!active?h("span",{style:{position:"absolute",top:-5,right:-5,background:"#D85A30",color:"#fff",
+            fontSize:8,padding:"1px 4px",borderRadius:3,fontWeight:700}},"LIVE"):null
+        );
+      })
+    ),
+    // Content
+    activeTab==="snapshot"?h(SnapshotView,null):
+    activeTab==="lite"    ?h(LiteView,null):
+    reg                   ?h(RegimeView,{r:reg}):null,
+    // Footer
+    h("div",{style:{fontSize:9,color:"#C4C1B8",marginTop:24,textAlign:"center",borderTop:"0.5px solid #EDEAE2",paddingTop:14}},
+      "Equity Compass v2.0 · equity-dominant tactical UCITS ETF rotation with cash management · Draft for IC review · Not for distribution")
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App,null));
+</script>
+</body>
+</html>
